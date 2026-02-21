@@ -117,6 +117,16 @@ def format_tags(data: dict) -> str:
     return f"Available tags ({count} total):\n{tags_str}"
 
 
+def format_amendment_result(data: dict) -> str:
+    """Format POST /traces/{id}/amendments response into a readable string."""
+    amendment_id = data.get("id", "unknown")
+    trace_id = data.get("original_trace_id", "unknown")
+    return (
+        f"Amendment submitted successfully (ID: {amendment_id}). "
+        f"Linked to trace {trace_id} — it will be reviewed by the community."
+    )
+
+
 def format_error(status_code: int, detail: str) -> str:
     """Format an HTTP error into a readable string for agents.
 

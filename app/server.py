@@ -1,6 +1,6 @@
 """CommonTrace MCP server.
 
-Defines all five MCP tools as a thin protocol adapter between MCP clients
+Defines all six MCP tools as a thin protocol adapter between MCP clients
 and the CommonTrace FastAPI backend. Each tool translates an MCP call into
 an authenticated HTTP request and formats the response for agent consumption.
 
@@ -8,11 +8,12 @@ All backend failures return human-readable degradation strings — never
 unhandled exceptions — so agent sessions can always continue.
 
 Tools:
-    search_traces   -- POST /api/v1/traces/search  (read, 200ms SLA)
-    contribute_trace -- POST /api/v1/traces         (write, 2s SLA)
-    vote_trace      -- POST /api/v1/traces/{id}/votes (write, 2s SLA)
-    get_trace       -- GET  /api/v1/traces/{id}    (read, 200ms SLA)
-    list_tags       -- GET  /api/v1/tags            (read, 200ms SLA)
+    search_traces    -- POST /api/v1/traces/search       (read, 200ms SLA)
+    contribute_trace -- POST /api/v1/traces              (write, 2s SLA)
+    vote_trace       -- POST /api/v1/traces/{id}/votes   (write, 2s SLA)
+    get_trace        -- GET  /api/v1/traces/{id}         (read, 200ms SLA)
+    list_tags        -- GET  /api/v1/tags                (read, 200ms SLA)
+    amend_trace      -- POST /api/v1/traces/{id}/amendments (write, 2s SLA)
 """
 
 import httpx
@@ -23,6 +24,7 @@ from starlette.responses import JSONResponse
 from app.backend_client import backend, CircuitOpenError, BackendUnavailableError
 from app.config import settings
 from app.formatters import (
+    format_amendment_result,
     format_contribution_result,
     format_error,
     format_search_results,
@@ -39,7 +41,8 @@ mcp = FastMCP(
         "Use contribute_trace after solving a problem to help future agents. "
         "Use vote_trace to rate traces you've used. "
         "Use get_trace to read a full trace by ID. "
-        "Use list_tags to discover available filter tags."
+        "Use list_tags to discover available filter tags. "
+        "Use amend_trace to propose an improved solution to an existing trace."
     ),
 )
 
@@ -278,6 +281,54 @@ async def list_tags(
         return format_error(exc.response.status_code, detail)
     except Exception as exc:
         return f"[CommonTrace error] Unexpected error: {exc}. Continuing without results."
+
+
+@mcp.tool(annotations={"readOnlyHint": False})
+async def amend_trace(
+    trace_id: str,
+    improved_solution: str,
+    explanation: str,
+    headers: dict = Depends(CurrentHeaders()),
+) -> str:
+    """Submit an amendment to an existing trace with an improved solution.
+
+    Args:
+        trace_id: UUID of the trace to amend
+        improved_solution: The improved solution text
+        explanation: Why this amendment is better than the original
+    """
+    api_key = _extract_api_key(headers)
+
+    try:
+        result = await backend.post(
+            f"/api/v1/traces/{trace_id}/amendments",
+            json={
+                "improved_solution": improved_solution,
+                "explanation": explanation,
+            },
+            api_key=api_key,
+            timeout=settings.write_timeout,
+        )
+        return format_amendment_result(result)
+    except CircuitOpenError:
+        return (
+            "[CommonTrace unavailable] The knowledge base is temporarily unreachable. "
+            "Your amendment could not be submitted. Please try again later."
+        )
+    except BackendUnavailableError:
+        return (
+            "[CommonTrace timeout] The submission took too long and was cancelled. "
+            "The knowledge base may be under heavy load. Please try again later."
+        )
+    except httpx.HTTPStatusError as exc:
+        detail = "Unknown error"
+        try:
+            detail = exc.response.json().get("detail", str(exc))
+        except Exception:
+            detail = str(exc)
+        return format_error(exc.response.status_code, detail)
+    except Exception as exc:
+        return f"[CommonTrace error] Unexpected error: {exc}. Your amendment was not recorded."
 
 
 @mcp.custom_route("/health", methods=["GET"])

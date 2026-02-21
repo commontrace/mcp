@@ -38,8 +38,13 @@ class CircuitBreaker:
         self.last_failure_time = 0.0
         self.state = "closed"
 
-    async def call(self, coro, timeout: float):
-        """Execute coroutine with circuit breaker protection and timeout."""
+    async def call(self, coro_factory, timeout: float):
+        """Execute coroutine factory with circuit breaker protection and timeout.
+
+        Args:
+            coro_factory: A zero-argument callable that returns a coroutine.
+            timeout: Per-request SLA timeout in seconds.
+        """
         if self.state == "open":
             if time.monotonic() - self.last_failure_time > self.recovery_timeout:
                 self.state = "half-open"
@@ -50,7 +55,7 @@ class CircuitBreaker:
                 )
 
         try:
-            result = await asyncio.wait_for(coro, timeout=timeout)
+            result = await asyncio.wait_for(coro_factory(), timeout=timeout)
             self._on_success()
             return result
         except (httpx.HTTPError, asyncio.TimeoutError, ConnectionError, OSError) as exc:
@@ -118,7 +123,7 @@ class BackendClient:
             )
             return resp  # Return raw response, NOT raise_for_status()
 
-        resp = await self.breaker.call(_request(), timeout=timeout)
+        resp = await self.breaker.call(_request, timeout=timeout)
         # 5xx are server errors — manually count as circuit breaker failure
         if resp.status_code >= 500:
             self.breaker._on_failure()
@@ -154,7 +159,7 @@ class BackendClient:
             )
             return resp  # Return raw response, NOT raise_for_status()
 
-        resp = await self.breaker.call(_request(), timeout=timeout)
+        resp = await self.breaker.call(_request, timeout=timeout)
         # 5xx are server errors — manually count as circuit breaker failure
         if resp.status_code >= 500:
             self.breaker._on_failure()
