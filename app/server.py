@@ -18,7 +18,7 @@ Tools:
 
 import httpx
 from fastmcp import FastMCP
-from fastmcp.dependencies import CurrentHeaders, Depends
+from fastmcp.dependencies import CurrentHeaders
 from starlette.responses import JSONResponse
 
 from app.backend_client import backend, CircuitOpenError, BackendUnavailableError
@@ -60,7 +60,7 @@ async def search_traces(
     query: str = "",
     tags: list[str] = [],
     limit: int = 10,
-    headers: dict = Depends(CurrentHeaders()),
+    headers: dict = CurrentHeaders(),
 ) -> str:
     """Search CommonTrace for coding traces matching a natural language query and/or tags.
 
@@ -109,7 +109,7 @@ async def contribute_trace(
     context_text: str,
     solution_text: str,
     tags: list[str] = [],
-    headers: dict = Depends(CurrentHeaders()),
+    headers: dict = CurrentHeaders(),
 ) -> str:
     """Submit a new trace to the CommonTrace knowledge base.
 
@@ -161,7 +161,7 @@ async def vote_trace(
     vote_type: str,
     feedback_tag: str = "",
     feedback_text: str = "",
-    headers: dict = Depends(CurrentHeaders()),
+    headers: dict = CurrentHeaders(),
 ) -> str:
     """Vote on a trace in the CommonTrace knowledge base.
 
@@ -211,7 +211,7 @@ async def vote_trace(
 @mcp.tool(annotations={"readOnlyHint": True})
 async def get_trace(
     trace_id: str,
-    headers: dict = Depends(CurrentHeaders()),
+    headers: dict = CurrentHeaders(),
 ) -> str:
     """Get a specific trace by ID from the CommonTrace knowledge base.
 
@@ -250,7 +250,7 @@ async def get_trace(
 
 @mcp.tool(annotations={"readOnlyHint": True})
 async def list_tags(
-    headers: dict = Depends(CurrentHeaders()),
+    headers: dict = CurrentHeaders(),
 ) -> str:
     """List all available tags in the CommonTrace knowledge base."""
     api_key = _extract_api_key(headers)
@@ -288,7 +288,7 @@ async def amend_trace(
     trace_id: str,
     improved_solution: str,
     explanation: str,
-    headers: dict = Depends(CurrentHeaders()),
+    headers: dict = CurrentHeaders(),
 ) -> str:
     """Submit an amendment to an existing trace with an improved solution.
 
