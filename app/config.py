@@ -20,8 +20,8 @@ class MCPSettings(BaseSettings):
     circuit_recovery_timeout: float = 30.0
 
     # SLA timeouts in seconds
-    read_timeout: float = 0.2   # 200ms for search/get/list_tags
-    write_timeout: float = 2.0  # 2s for contribute/vote
+    read_timeout: float = 10.0   # 10s for search/get/list_tags
+    write_timeout: float = 30.0  # 30s for contribute/vote (includes embedding generation)
 
 
 settings = MCPSettings()

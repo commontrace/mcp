@@ -84,7 +84,7 @@ class BackendClient:
     def __init__(self) -> None:
         self.client = httpx.AsyncClient(
             base_url=settings.api_base_url,
-            timeout=httpx.Timeout(5.0, connect=2.0),
+            timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         self.breaker = CircuitBreaker(
