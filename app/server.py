@@ -109,6 +109,9 @@ async def contribute_trace(
     context_text: str,
     solution_text: str,
     tags: list[str] = [],
+    supersedes_trace_id: str = "",
+    review_after: str = "",
+    watch_condition: str = "",
     headers: dict = CurrentHeaders(),
 ) -> str:
     """Submit a new trace to the CommonTrace knowledge base.
@@ -118,18 +121,29 @@ async def contribute_trace(
         context_text: The problem context (what you were trying to do)
         solution_text: The solution (what worked)
         tags: Categorization tags (e.g., python, fastapi, docker)
+        supersedes_trace_id: UUID of an older trace this one replaces (creates SUPERSEDES relationship)
+        review_after: ISO datetime when this trace should be re-validated (e.g., "2026-06-01T00:00:00Z")
+        watch_condition: Human-readable condition that would make this trace stale (e.g., "React 19 release")
     """
     api_key = _extract_api_key(headers)
+
+    body: dict = {
+        "title": title,
+        "context_text": context_text,
+        "solution_text": solution_text,
+        "tags": tags,
+    }
+    if supersedes_trace_id:
+        body["supersedes_trace_id"] = supersedes_trace_id
+    if review_after:
+        body["review_after"] = review_after
+    if watch_condition:
+        body["watch_condition"] = watch_condition
 
     try:
         result = await backend.post(
             "/api/v1/traces",
-            json={
-                "title": title,
-                "context_text": context_text,
-                "solution_text": solution_text,
-                "tags": tags,
-            },
+            json=body,
             api_key=api_key,
             timeout=settings.write_timeout,
         )

@@ -29,19 +29,34 @@ def format_search_results(data: dict) -> str:
         tags_str = ", ".join(tags) if tags else "(none)"
         trust = r.get("trust_score", 0.0)
         score = r.get("similarity_score", 0.0)
+        retrieval_count = r.get("retrieval_count", 0)
+        depth_score = r.get("depth_score", 0)
         context = (r.get("context_text") or "")[:200]
         solution = (r.get("solution_text") or "")[:200]
         context_snippet = context + ("..." if len(r.get("context_text") or "") > 200 else "")
         solution_snippet = solution + ("..." if len(r.get("solution_text") or "") > 200 else "")
 
-        lines.append(
+        entry = (
             f"{i}. {r.get('title', '(untitled)')} "
-            f"(score: {score:.2f}, trust: {trust:.1f})\n"
+            f"(score: {score:.2f}, trust: {trust:.1f}, retrievals: {retrieval_count}, depth: {depth_score})\n"
             f"   Tags: {tags_str}\n"
             f"   Context: {context_snippet}\n"
             f"   Solution: {solution_snippet}\n"
             f"   ID: {r.get('id', 'unknown')}\n"
         )
+
+        # Append related traces if present
+        related = r.get("related_traces", [])
+        if related:
+            related_lines = []
+            for rel in related[:3]:
+                rel_type = rel.get("relationship_type", "RELATED")
+                rel_title = rel.get("title", "(untitled)")
+                rel_id = rel.get("id", "unknown")
+                related_lines.append(f"     - [{rel_type}] {rel_title} ({rel_id})")
+            entry += "   Related:\n" + "\n".join(related_lines) + "\n"
+
+        lines.append(entry)
 
     return "\n".join(lines)
 
