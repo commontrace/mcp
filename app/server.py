@@ -60,6 +60,7 @@ async def search_traces(
     query: str = "",
     tags: list[str] = [],
     limit: int = 10,
+    context: dict = {},
     headers: dict = CurrentHeaders(),
 ) -> str:
     """Search CommonTrace for coding traces matching a natural language query and/or tags.
@@ -68,16 +69,21 @@ async def search_traces(
         query: Natural language description of what you're looking for
         tags: Filter by tags like language, framework, or task type (AND semantics)
         limit: Maximum number of results (1-50, default 10)
+        context: Searcher's environment context for relevance boosting (e.g. {"language": "python", "os": "linux"})
     """
     api_key = _extract_api_key(headers)
 
     if not query and not tags:
         return "Please provide a query, tags, or both to search."
 
+    body: dict = {"q": query or None, "tags": tags, "limit": limit}
+    if context:
+        body["context"] = context
+
     try:
         result = await backend.post(
             "/api/v1/traces/search",
-            json={"q": query or None, "tags": tags, "limit": limit},
+            json=body,
             api_key=api_key,
             timeout=settings.read_timeout,
         )
@@ -175,6 +181,7 @@ async def vote_trace(
     vote_type: str,
     feedback_tag: str = "",
     feedback_text: str = "",
+    voter_context: dict = {},
     headers: dict = CurrentHeaders(),
 ) -> str:
     """Vote on a trace in the CommonTrace knowledge base.
@@ -184,6 +191,7 @@ async def vote_trace(
         vote_type: "up" or "down"
         feedback_tag: Required for downvotes. One of: outdated, wrong, security_concern, spam
         feedback_text: Optional explanation for your vote
+        voter_context: Voter's environment context (e.g. {"language": "python", "os": "linux"}) for cross-context vote weighting
     """
     api_key = _extract_api_key(headers)
 
@@ -192,6 +200,8 @@ async def vote_trace(
         body["feedback_tag"] = feedback_tag
     if feedback_text:
         body["feedback_text"] = feedback_text
+    if voter_context:
+        body["voter_context"] = voter_context
 
     try:
         result = await backend.post(
