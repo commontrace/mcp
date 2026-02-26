@@ -36,8 +36,21 @@ def format_search_results(data: dict) -> str:
         context_snippet = context + ("..." if len(r.get("context_text") or "") > 200 else "")
         solution_snippet = solution + ("..." if len(r.get("solution_text") or "") > 200 else "")
 
+        # Status labels for temperature and validity
+        labels = []
+        temp = r.get("memory_temperature")
+        if temp == "FROZEN":
+            labels.append("[FROZEN]")
+        elif temp == "COLD":
+            labels.append("[COLD]")
+        valid_until = r.get("valid_until")
+        if valid_until:
+            labels.append("[EXPIRED]")
+        label_str = " ".join(labels)
+        title_display = f"{label_str} {r.get('title', '(untitled)')}" if labels else r.get("title", "(untitled)")
+
         entry = (
-            f"{i}. {r.get('title', '(untitled)')} "
+            f"{i}. {title_display} "
             f"(score: {score:.2f}, trust: {trust:.1f}, retrievals: {retrieval_count}, depth: {depth_score})\n"
             f"   Tags: {tags_str}\n"
             f"   Context: {context_snippet}\n"
@@ -75,9 +88,22 @@ def format_trace(data: dict) -> str:
     status = data.get("status", "unknown")
     trust = data.get("trust_score", 0.0)
 
+    # Validity period display
+    valid_from = data.get("valid_from")
+    valid_until = data.get("valid_until")
+    validity_line = ""
+    if valid_from:
+        valid_end = valid_until if valid_until else "present"
+        validity_line = f"\nValid: {valid_from} → {valid_end}"
+
+    # Temperature label
+    temp = data.get("memory_temperature")
+    temp_str = f" | Temperature: {temp}" if temp else ""
+
     return (
         f"{data.get('title', '(untitled)')}\n"
-        f"Status: {status} | Trust: {trust:.1f} | Tags: {tags_str}\n"
+        f"Status: {status} | Trust: {trust:.1f} | Tags: {tags_str}{temp_str}\n"
+        f"{validity_line}"
         f"\nContext:\n{data.get('context_text', '')}\n"
         f"\nSolution:\n{data.get('solution_text', '')}"
     )

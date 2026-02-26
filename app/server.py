@@ -61,6 +61,7 @@ async def search_traces(
     tags: list[str] = [],
     limit: int = 10,
     context: dict = {},
+    include_expired: bool = True,
     headers: dict = CurrentHeaders(),
 ) -> str:
     """Search CommonTrace for coding traces matching a natural language query and/or tags.
@@ -70,6 +71,7 @@ async def search_traces(
         tags: Filter by tags like language, framework, or task type (AND semantics)
         limit: Maximum number of results (1-50, default 10)
         context: Searcher's environment context for relevance boosting (e.g. {"language": "python", "os": "linux"})
+        include_expired: Include expired traces (de-ranked) or exclude entirely (default True)
     """
     api_key = _extract_api_key(headers)
 
@@ -79,6 +81,8 @@ async def search_traces(
     body: dict = {"q": query or None, "tags": tags, "limit": limit}
     if context:
         body["context"] = context
+    if not include_expired:
+        body["include_expired"] = False
 
     try:
         result = await backend.post(
