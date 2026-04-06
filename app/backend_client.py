@@ -7,6 +7,7 @@ circuit breaker protection and per-operation SLA timeouts.
 
 import asyncio
 import time
+from collections import defaultdict
 
 import httpx
 
@@ -20,6 +21,11 @@ class CircuitOpenError(Exception):
 
 class BackendUnavailableError(Exception):
     """Raised when a backend call fails (timeout, connection error, 5xx HTTP error)."""
+    pass
+
+
+class RateLimitError(Exception):
+    """M14: Raised when a client exceeds the MCP-layer rate limit."""
     pass
 
 
@@ -39,12 +45,7 @@ class CircuitBreaker:
         self.state = "closed"
 
     async def call(self, coro_factory, timeout: float):
-        """Execute coroutine factory with circuit breaker protection and timeout.
-
-        Args:
-            coro_factory: A zero-argument callable that returns a coroutine.
-            timeout: Per-request SLA timeout in seconds.
-        """
+        """Execute coroutine factory with circuit breaker protection and timeout."""
         if self.state == "open":
             if time.monotonic() - self.last_failure_time > self.recovery_timeout:
                 self.state = "half-open"
@@ -73,6 +74,49 @@ class CircuitBreaker:
             self.state = "open"
 
 
+class PerKeyCircuitBreakerPool:
+    """M11: Per-API-key circuit breakers — one bad actor can't block everyone."""
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0, max_keys: int = 1000):
+        self._breakers: dict[str, CircuitBreaker] = {}
+        self._failure_threshold = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._max_keys = max_keys
+
+    def get(self, api_key: str) -> CircuitBreaker:
+        if api_key not in self._breakers:
+            # Evict oldest if at capacity
+            if len(self._breakers) >= self._max_keys:
+                oldest_key = next(iter(self._breakers))
+                del self._breakers[oldest_key]
+            self._breakers[api_key] = CircuitBreaker(
+                self._failure_threshold, self._recovery_timeout
+            )
+        return self._breakers[api_key]
+
+
+class TokenBucketRateLimiter:
+    """M14: Simple in-memory token bucket rate limiter per API key."""
+
+    def __init__(self, max_tokens: int = 30, refill_per_second: float = 0.5):
+        self._max_tokens = max_tokens
+        self._refill_rate = refill_per_second
+        self._buckets: dict[str, tuple[float, float]] = {}  # key -> (tokens, last_refill)
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        tokens, last_refill = self._buckets.get(key, (self._max_tokens, now))
+
+        elapsed = now - last_refill
+        tokens = min(self._max_tokens, tokens + elapsed * self._refill_rate)
+
+        if tokens >= 1:
+            self._buckets[key] = (tokens - 1, now)
+            return True
+        self._buckets[key] = (tokens, now)
+        return False
+
+
 class BackendClient:
     """Thin wrapper around httpx.AsyncClient for backend API calls.
 
@@ -87,10 +131,13 @@ class BackendClient:
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
-        self.breaker = CircuitBreaker(
+        # M11: Per-API-key circuit breakers
+        self.breaker_pool = PerKeyCircuitBreakerPool(
             failure_threshold=settings.circuit_failure_threshold,
             recovery_timeout=settings.circuit_recovery_timeout,
         )
+        # M14: MCP-layer rate limiting (30 requests/min per key)
+        self.rate_limiter = TokenBucketRateLimiter(max_tokens=30, refill_per_second=0.5)
 
     async def post(
         self,
@@ -115,20 +162,24 @@ class BackendClient:
             BackendUnavailableError: On timeout, connection error, or 5xx response
             httpx.HTTPStatusError: On 4xx responses (client errors, do NOT trip circuit)
         """
+        if not self.rate_limiter.allow(api_key):
+            raise RateLimitError("MCP rate limit exceeded. Please slow down.")
+
+        breaker = self.breaker_pool.get(api_key)
+
         async def _request():
             resp = await self.client.post(
                 path,
                 json=json,
                 headers={"X-API-Key": api_key},
             )
-            return resp  # Return raw response, NOT raise_for_status()
+            return resp
 
-        resp = await self.breaker.call(_request, timeout=timeout)
-        # 5xx are server errors — manually count as circuit breaker failure
+        resp = await breaker.call(_request, timeout=timeout)
         if resp.status_code >= 500:
-            self.breaker._on_failure()
+            breaker._on_failure()
             raise BackendUnavailableError(f"Backend returned {resp.status_code}")
-        resp.raise_for_status()  # Raises httpx.HTTPStatusError for 4xx (does NOT trip circuit)
+        resp.raise_for_status()
         return resp.json()
 
     async def get(
@@ -137,34 +188,24 @@ class BackendClient:
         api_key: str,
         timeout: float = 0.5,
     ) -> dict:
-        """GET from backend with circuit breaker protection.
+        """GET from backend with circuit breaker protection."""
+        if not self.rate_limiter.allow(api_key):
+            raise RateLimitError("MCP rate limit exceeded. Please slow down.")
 
-        Args:
-            path: URL path (e.g. "/api/v1/tags")
-            api_key: API key forwarded from MCP client headers
-            timeout: Per-request SLA timeout in seconds
+        breaker = self.breaker_pool.get(api_key)
 
-        Returns:
-            Parsed JSON response body as dict
-
-        Raises:
-            CircuitOpenError: When circuit breaker is open
-            BackendUnavailableError: On timeout, connection error, or 5xx response
-            httpx.HTTPStatusError: On 4xx responses (client errors, do NOT trip circuit)
-        """
         async def _request():
             resp = await self.client.get(
                 path,
                 headers={"X-API-Key": api_key},
             )
-            return resp  # Return raw response, NOT raise_for_status()
+            return resp
 
-        resp = await self.breaker.call(_request, timeout=timeout)
-        # 5xx are server errors — manually count as circuit breaker failure
+        resp = await breaker.call(_request, timeout=timeout)
         if resp.status_code >= 500:
-            self.breaker._on_failure()
+            breaker._on_failure()
             raise BackendUnavailableError(f"Backend returned {resp.status_code}")
-        resp.raise_for_status()  # Raises httpx.HTTPStatusError for 4xx (does NOT trip circuit)
+        resp.raise_for_status()
         return resp.json()
 
     async def close(self) -> None:

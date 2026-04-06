@@ -24,7 +24,7 @@ from fastmcp import FastMCP
 from fastmcp.dependencies import CurrentHeaders
 from starlette.responses import JSONResponse
 
-from app.backend_client import backend, CircuitOpenError, BackendUnavailableError
+from app.backend_client import backend, CircuitOpenError, BackendUnavailableError, RateLimitError
 from app.config import settings
 from app.formatters import (
     format_amendment_result,
@@ -388,7 +388,7 @@ async def amend_trace(
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request):
     """Health endpoint for Docker Compose healthchecks (HTTP transport only)."""
-    return JSONResponse({"status": "healthy", "service": "commontrace-mcp"})
+    return JSONResponse({"status": "healthy"})
 
 
 if __name__ == "__main__":
