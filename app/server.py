@@ -16,6 +16,9 @@ Tools:
     amend_trace      -- POST /api/v1/traces/{id}/amendments (write, 2s SLA)
 """
 
+import re
+import uuid
+
 import httpx
 from fastmcp import FastMCP
 from fastmcp.dependencies import CurrentHeaders
@@ -52,7 +55,22 @@ def _extract_api_key(headers: dict) -> str:
     api_key = headers.get("x-api-key", "")
     if not api_key:
         api_key = settings.commontrace_api_key
+    if not api_key:
+        raise ValueError("No API key provided. Set x-api-key header or COMMONTRACE_API_KEY env var.")
     return api_key
+
+
+def _validate_uuid(value: str, name: str = "trace_id") -> str:
+    """H6: Validate that a string is a valid UUID to prevent path traversal."""
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError):
+        raise ValueError(f"Invalid {name}: must be a valid UUID")
+    return value
+
+
+def _clamp(value: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, value))
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -77,6 +95,11 @@ async def search_traces(
 
     if not query and not tags:
         return "Please provide a query, tags, or both to search."
+
+    # M12: Validate inputs
+    query = query[:1000]
+    tags = tags[:20]
+    limit = _clamp(limit, 1, 50)
 
     body: dict = {"q": query or None, "tags": tags, "limit": limit}
     if context:
@@ -109,8 +132,8 @@ async def search_traces(
         except Exception:
             detail = str(exc)
         return format_error(exc.response.status_code, detail)
-    except Exception as exc:
-        return f"[CommonTrace error] Unexpected error: {exc}. Continuing without results."
+    except Exception:
+        return "[CommonTrace error] An unexpected error occurred. Continuing without results."
 
 
 @mcp.tool(annotations={"readOnlyHint": False})
@@ -175,8 +198,8 @@ async def contribute_trace(
         except Exception:
             detail = str(exc)
         return format_error(exc.response.status_code, detail)
-    except Exception as exc:
-        return f"[CommonTrace error] Unexpected error: {exc}. Your submission was not recorded."
+    except Exception:
+        return "[CommonTrace error] An unexpected error occurred. Your submission was not recorded."
 
 
 @mcp.tool(annotations={"readOnlyHint": False})
@@ -197,6 +220,7 @@ async def vote_trace(
         feedback_text: Optional explanation for your vote
         voter_context: Voter's environment context (e.g. {"language": "python", "os": "linux"}) for cross-context vote weighting
     """
+    _validate_uuid(trace_id)
     api_key = _extract_api_key(headers)
 
     body: dict = {"vote_type": vote_type}
@@ -232,8 +256,8 @@ async def vote_trace(
         except Exception:
             detail = str(exc)
         return format_error(exc.response.status_code, detail)
-    except Exception as exc:
-        return f"[CommonTrace error] Unexpected error: {exc}. Your submission was not recorded."
+    except Exception:
+        return "[CommonTrace error] An unexpected error occurred. Your submission was not recorded."
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -246,6 +270,7 @@ async def get_trace(
     Args:
         trace_id: UUID of the trace to retrieve
     """
+    _validate_uuid(trace_id)
     api_key = _extract_api_key(headers)
 
     try:
@@ -272,8 +297,8 @@ async def get_trace(
         except Exception:
             detail = str(exc)
         return format_error(exc.response.status_code, detail)
-    except Exception as exc:
-        return f"[CommonTrace error] Unexpected error: {exc}. Continuing without results."
+    except Exception:
+        return "[CommonTrace error] An unexpected error occurred. Continuing without results."
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
@@ -307,8 +332,8 @@ async def list_tags(
         except Exception:
             detail = str(exc)
         return format_error(exc.response.status_code, detail)
-    except Exception as exc:
-        return f"[CommonTrace error] Unexpected error: {exc}. Continuing without results."
+    except Exception:
+        return "[CommonTrace error] An unexpected error occurred. Continuing without results."
 
 
 @mcp.tool(annotations={"readOnlyHint": False})
@@ -325,6 +350,7 @@ async def amend_trace(
         improved_solution: The improved solution text
         explanation: Why this amendment is better than the original
     """
+    _validate_uuid(trace_id)
     api_key = _extract_api_key(headers)
 
     try:

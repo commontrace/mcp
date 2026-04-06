@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class MCPSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
-    api_base_url: str = "http://localhost:8000"
+    api_base_url: str = "https://api.commontrace.org"
     commontrace_api_key: str = ""  # fallback for stdio transport
     mcp_transport: str = "stdio"   # "stdio" or "http"
     mcp_host: str = "0.0.0.0"
